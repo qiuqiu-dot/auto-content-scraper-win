@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+results/
+data/
+test_downloads/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Windows
+*.exe
+*.dll
+
+# Local config
+.env
+.env.local
+*.local
+PYEOF
