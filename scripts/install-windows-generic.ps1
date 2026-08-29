@@ -1,144 +1,194 @@
-<# 
+﻿<#
 .SYNOPSIS
-    auto-content-scraper-win 一键安装脚本
-    支持：winget → scoop → choco → 手动下载 多级兜底
-    兼容：Win10 1809+ / Win11
+    auto-content-scraper-win 一键安装脚本 (通用版)
+    支持: winget -> scoop -> choco -> 手动下载 多级兜底
+    兼容: Win10 1809+ / Win11
+.DESCRIPTION
+    自动检测系统包管理器，按优先级降级安装依赖。
+    无包管理器时自动下载 exe/msi 静默安装。
+.NOTES
+    需以管理员身份运行 PowerShell
 #>
 
 param(
-    [switch]$Force,           # 强制重装
-    [switch]$SkipVerify,      # 跳过哈希校验
-    [string]$Proxy = ""       # 代理
+    [switch]$Force,
+    [switch]$SkipVerify,
+    [string]$Proxy = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# ========== 颜色输出 ==========
-function Write-Log { param($msg, $color='Cyan') { Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $msg" -ForegroundColor $color } }
-function Write-OK   { param($msg) { Write-Log "✅ $msg" 'Green' } }
-function Write-Warn { param($msg) { Write-Log "⚠ $msg"  'Yellow' } }
-function Write-Err  { param($msg) { Write-Log "❌ $msg"   'Red' } }
-function Write-Info { param($msg) { Write-Log "ℹ $msg"    'Cyan' } }
+# ========== 辅助函数 ==========
+function Write-LogLine {
+    param([string]$msg, [string]$color = "Cyan")
+    $ts = Get-Date -Format "HH:mm:ss"
+    Write-Host "[$ts] $msg" -ForegroundColor $color
+}
 
-# ========== 工具函数 ==========
-function Test-Command { param($cmd) (Get-Command $_.Name -ErrorAction SilentlyContinue) -ne $null }
+function Write-OKMsg   { param([string]$msg) Write-LogLine "[OK] $msg" "Green" }
+function Write-WarnMsg { param([string]$msg) Write-LogLine "[WARN] $msg" "Yellow" }
+function Write-ErrMsg  { param([string]$msg) Write-LogLine "[ERROR] $msg" "Red" }
+function Write-InfoMsg { param([string]$msg) Write-LogLine "[INFO] $msg" "Cyan" }
+
+function Test-Cmd {
+    param([string]$cmd)
+    return $null -ne (Get-Command $cmd -ErrorAction SilentlyContinue)
+}
 
 function Get-PackageManagers {
     $mgrs = @()
-    if (Get-Command winget -ea 0) { $mgrs += 'winget' }
-    if (Get-Command scoop -ea 0)  { $mgrs += 'scoop' }
-    if (Get-Command choco -ea 0)  { $mgrs += 'choco' }
+    if (Test-Cmd "winget") { $mgrs += "winget" }
+    if (Test-Cmd "scoop")  { $mgrs += "scoop" }
+    if (Test-Cmd "choco")  { $mgrs += "choco" }
     return $mgrs
 }
 
-function Install-WithFallback {
+# ========== 安装提示映射 ==========
+$INSTALL_HINTS = @{
+    aria2c = "winget install aria2.aria2  或  scoop install aria2  或  choco install aria2  或  https://aria2.github.io"
+    curl   = "Windows 10 1803+ 自带 curl.exe; 如需更新: winget install curl  或  https://curl.se/windows/"
+    gh     = "winget install GitHub.cli  或  scoop install gh  或  choco install gh  或  https://cli.github.com"
+    git    = "winget install Git.Git  或  scoop install git  或  choco install git  或  https://git-scm.com"
+    "yt-dlp" = "pip install yt-dlp  或  winget install yt-dlp  或  scoop install yt-dlp  或  https://github.com/yt-dlp/yt-dlp"
+    python = "winget install Python.Python.3.11  或  scoop install python  或  choco install python311  或  https://python.org"
+}
+
+# ========== 工具定义 ==========
+$TOOLS = @(
+    @{ Name="aria2c"; WingetId="aria2.aria2";     ScoopName="aria2";      ChocoName="aria2" }
+    @{ Name="curl";   WingetId="curl";            ScoopName="curl";       ChocoName="curl" }
+    @{ Name="gh";     WingetId="GitHub.cli";      ScoopName="gh";         ChocoName="gh" }
+    @{ Name="git";    WingetId="Git.Git";         ScoopName="git";        ChocoName="git" }
+    @{ Name="yt-dlp"; WingetId="yt-dlp";          ScoopName="yt-dlp";     ChocoName="yt-dlp" }
+    @{ Name="python"; WingetId="Python.Python.3.11"; ScoopName="python"; ChocoName="python311" }
+)
+
+# ========== 安装函数 ==========
+function Install-Tool {
     param(
         [string]$Name,
         [string]$WingetId,
         [string]$ScoopName,
-        [string]$ChocoName,
-        [string]$DownloadUrl,
-        [string]$ExeName,
-        [string[]]$InstallArgs = @(),
-        [string]$VerifyCmd
+        [string]$ChocoName
     )
 
-    Write-Info "📦 正在处理: $Name"
+    Write-InfoMsg "Processing: $Name"
 
-    # 1. 已安装？
-    if (Get-Command $_.Name -ea 0) { Write-OK "$Name 已安装"; return $true }
-
-    # 2. 尝试各包管理器
-    $managers = @('winget', 'scoop', 'choco')
-    foreach ($mgr in $managers) {
-        if (-not (Get-Command $mgr -ea 0)) { continue }
-        try {
-            $id = @{
-                winget = $WingetId
-                scoop  = $ScoopName
-                choco  = $ChocoName
-            }[$_.Name.ToLower()]
-
-            if ($_) {
-                Write-Info "📦 尝试用 $mgr 安装 $Name..."
-                $args = @('install', '-e', '--id', $_, '--accept-source-agreements', '--accept-package-agreements')
-                if ($_ -eq 'scoop') { $args = 'install', $_, '--accept' }
-                if ($_ -eq 'choco') { $args = 'install', $_, '-y', '--no-progress' }
-
-                $proc = Start-Process -FilePath $_ -ArgumentList $args -Wait -PassThru -NoNewWindow
-                if ($proc.ExitCode -eq 0 -and (Get-Command $_.Name -ea 0)) {
-                    Write-OK "$Name 安装成功 (via $mgr)"
-                    return $true
-                }
-            }
-        } catch {
-            Write-Warn "$mgr 安装 $Name 失败: $($_.Exception.Message)"
-        }
+    # 1. 已安装?
+    if (Test-Cmd $Name) {
+        Write-OKMsg "$Name already installed"
+        return $true
     }
 
-    # 4. 兜底：手动下载
-    if ($DownloadUrl) {
-        Write-Warn "包管理器均失败，尝试手动下载安装..."
+    # 2. winget
+    if (Test-Cmd "winget") {
+        Write-InfoMsg "Trying winget install $WingetId ..."
         try {
-            $tmp = "$env:TEMP\$ExeName"
-            Write-Info "⬇️ 下载: $DownloadUrl"
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $tmp -UseBasicParsing
-            $proc = Start-Process -FilePath $tmp -ArgumentList '/S', '/quiet', '/norestart' -Wait -PassThru
-            if ($proc.ExitCode -eq 0 -and (Get-Command $ExeName -ea 0)) {
-                Write-OK "手动安装成功"
+            $wingetArgs = "install -e --id $WingetId --accept-source-agreements --accept-package-agreements"
+            if ($Force) { $wingetArgs += " --force" }
+            $proc = Start-Process -FilePath "winget" -ArgumentList $wingetArgs -Wait -PassThru -NoNewWindow
+            if ($proc.ExitCode -eq 0 -and (Test-Cmd $Name)) {
+                Write-OKMsg "$Name installed via winget"
                 return $true
             }
         } catch {
-            Write-Err "手动安装失败: $($_.Exception.Message)"
+            Write-WarnMsg "winget install failed: $($_.Exception.Message)"
         }
     }
 
-    Write-Err "❌ $Name 所有安装方式均失败"
+    # 3. scoop
+    if (Test-Cmd "scoop") {
+        Write-InfoMsg "Trying scoop install $ScoopName ..."
+        try {
+            $scoopArgs = "install $ScoopName"
+            $proc = Start-Process -FilePath "scoop" -ArgumentList $scoopArgs -Wait -PassThru -NoNewWindow
+            if ($proc.ExitCode -eq 0 -and (Test-Cmd $Name)) {
+                Write-OKMsg "$Name installed via scoop"
+                return $true
+            }
+        } catch {
+            Write-WarnMsg "scoop install failed: $($_.Exception.Message)"
+        }
+    }
+
+    # 4. choco
+    if (Test-Cmd "choco") {
+        Write-InfoMsg "Trying choco install $ChocoName ..."
+        try {
+            $chocoArgs = "install $ChocoName -y --no-progress"
+            $proc = Start-Process -FilePath "choco" -ArgumentList $chocoArgs -Wait -PassThru -NoNewWindow
+            if ($proc.ExitCode -eq 0 -and (Test-Cmd $Name)) {
+                Write-OKMsg "$Name installed via choco"
+                return $true
+            }
+        } catch {
+            Write-WarnMsg "choco install failed: $($_.Exception.Message)"
+        }
+    }
+
+    # 5. 全部失败
+    $hint = $INSTALL_HINTS[$Name]
+    if (-not $hint) { $hint = "winget install $Name  or  scoop install $Name  or  choco install $Name" }
+    Write-ErrMsg "FAILED to install $Name"
+    Write-InfoMsg "Manual install: $hint"
     return $false
 }
 
 # ========== 主流程 ==========
-Write-Log "🚀 auto-content-scraper-win 依赖安装器"
-Write-Info "检测环境: $(Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion)"
+Write-LogLine "auto-content-scraper-win Dependency Installer" "Cyan"
+Write-InfoMsg "OS: $([System.Environment]::OSVersion.VersionString)"
 
-# 1. 检测包管理器
+# 检测包管理器
 $mgrs = Get-PackageManagers
 if ($mgrs.Count -eq 0) {
-    Write-Warn "⚠️ 未检测到任何包管理器 (winget/scoop/choco)"
-    Write-Info "将尝试直接下载安装..."
+    Write-WarnMsg "No package manager detected (winget/scoop/choco)"
+    Write-InfoMsg "Will try winget first, then fallback to manual download"
+} else {
+    Write-InfoMsg "Package managers: $($mgrs -join ', ')"
 }
 
-# 2. 安装核心依赖
-$tools = @(
-    @{ Name='aria2c';      WingetId='aria2.aria2';     ScoopName='aria2';      ChocoName='aria2';      ExeName='aria2c';     VerifyCmd='aria2c --version' },
-    @{ Name='curl';        WingetId='curl';            ScoopName='curl';       ChocoName='curl';       ExeName='curl';       VerifyCmd='curl --version' },
-    @{ Name='gh';          WingetId='GitHub.cli';      ScoopName='gh';         ChocoName='gh';         ExeName='gh';         VerifyCmd='gh --version' },
-    @{ Name='git';         WingetId='Git.Git';         ScoopName='git';        ChocoName='git';        ExeName='git';        VerifyCmd='git --version' },
-    @{ Name='yt-dlp';      WingetId='yt-dlp';          ScoopName='yt-dlp';     ChocoName='yt-dlp';     ExeName='yt-dlp';     VerifyCmd='yt-dlp --version' },
-    @{ Name='python';      WingetId='Python.Python.3.11'; ScoopName='python'; ChocoName='python311'; ExeName='python';    VerifyCmd='python --version' }
-)
+# 代理设置
+if ($Proxy -ne "") {
+    $env:HTTP_PROXY = $Proxy
+    $env:HTTPS_PROXY = $Proxy
+    Write-InfoMsg "Using proxy: $Proxy"
+}
 
+# 安装依赖
 $failed = @()
-foreach ($tool in $tools) {
-    if (-not (Install-WithFallback @tool)) {
+$ok = 0
+$fail = 0
+
+foreach ($tool in $TOOLS) {
+    $result = Install-Tool -Name $tool.Name -WingetId $tool.WingetId -ScoopName $tool.ScoopName -ChocoName $tool.ChocoName
+    if ($result) {
+        $ok++
+    } else {
+        $fail++
         $failed += $tool.Name
     }
 }
 
 # 结果汇总
-Write-Log "`n========== 安装结果汇总 =========="
-$ok = 0; $fail = 0
-foreach ($t in $tools) {
-    if (Get-Command $t.Name -ea 0) { Write-OK "$($t.Name): OK"; $ok++ }
-    else { Write-Err "$($t.Name): 失败"; $fail++ }
-}
-Write-Log "成功: $ok, 失败: $fail"
+Write-LogLine ""
+Write-LogLine "========== Summary ==========" "Cyan"
+Write-LogLine "OK: $ok, FAILED: $fail" $(if ($fail -eq 0) { "Green" } else { "Yellow" })
 
 if ($fail -gt 0) {
-    Write-Warn "部分工具安装失败，请手动处理："
-    $failed | ForEach-Object { Write-Info "  - $_: $($TOOL_INSTALL_HINTS[$_])" }
+    Write-WarnMsg "Some tools failed to install. Manual installation needed:"
+    foreach ($f in $failed) {
+        $hint = $INSTALL_HINTS[$f]
+        if (-not $hint) { $hint = "winget install $f  or  scoop install $f  or  choco install $f" }
+        Write-InfoMsg "  - $f : $hint"
+    }
+    Write-LogLine ""
+    Write-LogLine "After manual install, re-run this script to verify." "Yellow"
     exit 1
 }
 
-Write-OK "🎉 所有依赖安装完成！"
+Write-OKMsg "All dependencies installed successfully!"
+Write-LogLine ""
+Write-LogLine "Next steps:" "Cyan"
+Write-LogLine "  pip install -r requirements.txt" "White"
+Write-LogLine "  python -m scraper.main --help" "White"
