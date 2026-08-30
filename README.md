@@ -96,7 +96,7 @@ pip install requests beautifulsoup4 lxml
 
 ```powershell
 # 右键“以管理员身份运行” PowerShell，执行：
-irm https://raw.githubusercontent.com/qiuqiu-dot/auto-content-scraper-win/main/scripts/install-windows.ps1 | iex
+irm https://raw.githubusercontent.com/qiuqiu-dot/auto-content-scraper-win/main/scripts/install-windows-generic.ps1 | iex
 ```
 
 或手动运行脚本：

@@ -1,10 +1,15 @@
-﻿<#
+<#
 .SYNOPSIS
     auto-content-scraper-win 一键安装脚本
     用 curl -o 下载 aria2，用 pip 安装 yt-dlp
 .NOTES
     需以管理员身份运行 PowerShell
 #>
+
+# ===== 关键：强制 UTF-8 编码，防止中文乱码 =====
+chcp 65001 >$null
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf-8'
 
 param([string]$Proxy = "")
 
@@ -18,21 +23,21 @@ function Write-Err  { param([string]$msg) Write-Host "[ERROR] $msg" -ForegroundC
 if ($Proxy -ne "") {
     $env:HTTP_PROXY = $Proxy
     $env:HTTPS_PROXY = $Proxy
-    Write-Info "Using proxy: $Proxy"
+    Write-Host "[INFO] Using proxy: $Proxy" -ForegroundColor Cyan
 }
 
 # ========== 1. curl (Win10 1803+ 自带) ==========
-Write-Info "Checking curl..."
+Write-Host "[INFO] Checking curl..." -ForegroundColor Cyan
 $curl = Get-Command curl -ErrorAction SilentlyContinue
 if ($curl) {
-    Write-OK "curl OK: $($curl.Source)"
+    Write-Host "[OK] curl OK: $($curl.Source)" -ForegroundColor Green
 } else {
     Write-Err "curl not found. Windows 10 1803+ required."
     exit 1
 }
 
 # ========== 2. Python ==========
-Write-Info "Checking Python..."
+Write-Host "[INFO] Checking Python..." -ForegroundColor Cyan
 if (Get-Command python -ErrorAction SilentlyContinue) {
     Write-OK "Python OK"
 } else {
@@ -41,7 +46,7 @@ if (Get-Command python -ErrorAction SilentlyContinue) {
     exit 1
 }
 
-# ========== 3. aria2 ==========
+# ========== 2. aria2 ==========
 Write-Info "Checking aria2c..."
 if (Get-Command aria2c -ErrorAction SilentlyContinue) {
     Write-OK "aria2c OK"
@@ -62,7 +67,6 @@ if (Get-Command aria2c -ErrorAction SilentlyContinue) {
     Expand-Archive -Path $zip -DestinationPath $dest -Force
     Remove-Item $zip -Force
     
-    # 找到 aria2c.exe 并加入 PATH
     $exe = Get-ChildItem $dest -Recurse -Filter "aria2c.exe" | Select-Object -First 1
     if ($exe) {
         $dir = $exe.DirectoryName
@@ -99,7 +103,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
     Write-OK "gh OK"
 } else {
     Write-Info "gh not found (optional, for GitHub features)"
-    Write-Info "Install: winget install GitHub.cli  or  https://cli.github.com"
+    Write-Info "Install: winget install GitHub.cli"
 }
 
 # ========== 6. Python 依赖 ==========
@@ -111,7 +115,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Err "Failed to install Python dependencies"
 }
 
-# ========== 汇总 ==========
+# ========== Summary ==========
 Write-Host ""
 Write-Host "========== Summary ==========" -ForegroundColor Cyan
 $tools = @("curl", "python", "aria2c", "yt-dlp", "gh")
