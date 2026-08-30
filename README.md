@@ -1,4 +1,4 @@
-# Auto Content Scraper - Windows 版
+﻿# Auto Content Scraper - Windows 版
 
 自动抓取「网上优质内容 / 资源站 / 下载站」的程序。
 通过 **Bing 搜索** 或 **手动输入网址** 发现/抓取内容，结合 **信誉站白名单库** 与启发式打分做可信度评估，
