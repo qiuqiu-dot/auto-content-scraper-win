@@ -8,7 +8,7 @@ __pycache__/
 dist/
 build/
 *.egg
-
+tests/
 # Virtual environments
 venv/
 env/
@@ -39,4 +39,3 @@ Thumbs.db
 .env
 .env.local
 *.local
-PYEOF

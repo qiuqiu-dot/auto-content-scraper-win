@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 import re
 import shutil
@@ -17,7 +18,7 @@ import subprocess
 from typing import List, Optional
 from urllib.parse import urlparse, unquote
 
-from .win_utils import ensure_tool, find_tool_smart, aria2_available, ytdlp_available
+from .win_utils import ensure_tool, find_tool_smart, aria2_available, ytdlp_available, sanitize_filename
 
 
 def decode_thunder_url(thunder_url: str) -> Optional[str]:
@@ -30,7 +31,10 @@ def decode_thunder_url(thunder_url: str) -> Optional[str]:
         decoded = base64.b64decode(pad).decode("utf-8", errors="ignore")
         if decoded.startswith("AA") and decoded.endswith("ZZ"):
             decoded = decoded[2:-2]
-        return decoded
+        # 验证解码结果是否为有效 URL
+        if decoded.startswith(("http://", "https://", "ftp://")):
+            return decoded
+        return None
     except Exception:
         return None
 
@@ -40,17 +44,17 @@ def is_thunder_url(url: str) -> bool:
 
 
 def pick_filename(url: str, content_disposition: str = "") -> str:
-    """从 URL 或 Content-Disposition 推测保存文件名。"""
+    """从 URL 或 Content-Disposition 推测保存文件名（安全版）。"""
     if content_disposition:
         m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', content_disposition, re.I)
         if m:
-            return unquote(m.group(1).strip())
+            return sanitize_filename(unquote(m.group(1).strip()))
     path = urlparse(url).path
     base = os.path.basename(path)
     if base and "." in base:
-        return unquote(base)
+        return sanitize_filename(unquote(base))
     nm = urlparse(url).netloc.replace("/", "_")
-    return nm or "download"
+    return sanitize_filename(nm or "download")
 
 
 def is_downloadable_url(url: str) -> bool:
@@ -59,6 +63,7 @@ def is_downloadable_url(url: str) -> bool:
         real = decode_thunder_url(url)
         if real:
             return is_downloadable_url(real)
+        # 无法解码的迅雷链接，保守返回 True
         return True
     p = unquote(urlparse(url).path).lower()
     exts = (".exe", ".msi", ".apk", ".dmg", ".pkg", ".deb", ".rpm", ".zip",
@@ -105,6 +110,8 @@ def download_with_aria2(
         if decoded:
             real_url = decoded
     filename = filename or pick_filename(real_url)
+    # 再次清理文件名（双重保险）
+    filename = sanitize_filename(filename)
     # 确保 aria2c 可用
     aria2c = ensure_tool("aria2c")
     cmd = [aria2c,
@@ -155,6 +162,7 @@ def download_with_ytdlp(
            "--no-playlist",
            "--continue",
            "--no-overwrites",
+           "--restrict-filenames",  # 强制安全文件名
            ]
     if extra_args:
         cmd += extra_args
@@ -189,6 +197,7 @@ def download_fallback(url: str, threads: int, outdir: str, filename: str = "") -
         if decoded:
             real_url = decoded
     filename = filename or pick_filename(real_url)
+    filename = sanitize_filename(filename)
     fp = os.path.join(outdir, filename)
     partial = fp + ".part"
     try:
@@ -208,6 +217,20 @@ def download_fallback(url: str, threads: int, outdir: str, filename: str = "") -
         return {"ok": True, "file": fp, "detail": "fallback(单线程)完成"}
     except Exception as e:
         return {"ok": False, "file": fp, "detail": f"fallback失败: {str(e)[:120]}"}
+
+
+def verify_file_hash(filepath: str, expected_hash: str = "", algorithm: str = "sha256") -> bool:
+    """验证文件哈希值。"""
+    if not expected_hash or not os.path.exists(filepath):
+        return False
+    try:
+        h = hashlib.new(algorithm)
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        return h.hexdigest().lower() == expected_hash.lower()
+    except Exception:
+        return False
 
 
 def batch_download(

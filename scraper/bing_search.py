@@ -54,25 +54,26 @@ def _is_nav_or_ads(href: str) -> bool:
     if not href:
         return True
     low = href.lower()
-    if "bing.com/search" in low and "?" not in low:
-        return True
     if low.startswith("javascript:"):
         return True
     if href == "#" or href == "":
         return True
-    if any(m in low for m in ("bing.com", "microsoft.com/edge")):
-        return False
+    # Bing 内部链接（搜索、登录、设置等）
+    if "bing.com" in low and ("search" in low or "signin" in low or "preferences" in low or "maps" in low):
+        return True
+    if "microsoft.com" in low and ("account" in low or "login" in low):
+        return True
     return False
 
 
-_BING_REDIR = re.compile(r"bing\.com/ck/a\?a=[^&]+&u=(a1[0-9a-f])?([^&]+)", re.I)
+_BING_REDIR = re.compile(r"bing\.com/ck/a\?.*?[&?]u=([^&]+)", re.I)
 
 
 def _decode_bing_redirect(url: str) -> str:
     """解码 Bing 的 /ck/a 跳转链接中真实 URL。"""
     m = _BING_REDIR.search(url)
     if m:
-        encoded = m.group(2) or ""
+        encoded = m.group(1) or ""
         try:
             import base64
             pad = encoded + "=" * (-len(encoded) % 4)

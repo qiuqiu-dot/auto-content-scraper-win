@@ -36,7 +36,7 @@ DEFAULT_QUERIES = [
 ]
 
 OUT_DIRNAME = "results"
-_RESPECT_ROBOTS = False
+_RESPECT_ROBOTS = True
 
 
 def make_outdir(base: str) -> str:
@@ -381,7 +381,7 @@ def main():
     p.add_argument("--timeout", type=int, default=12, help="每页超时(秒)")
     p.add_argument("--interactive", action="store_true", help="交互模式")
     p.add_argument("--respect-robots", action="store_true",
-                   help="遵守抓取目标 robots.txt（默认关闭以增强可用性）")
+                   help="遵守抓取目标 robots.txt（默认开启以遵守爬虫礼仪）")
     p.add_argument("--output", "-o", default=".", help="输出根目录")
     args = p.parse_args()
 

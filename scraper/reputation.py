@@ -96,6 +96,7 @@ def score_url_level(url: str, netloc: str) -> "Reputation":
         score -= 6
 
     r.base_score = score
+    r.final_score = score  # 同步 final_score，便于单独测试
     return r
 
 
@@ -140,6 +141,7 @@ def score_content_level(url: str, ec: ExtractedContent) -> Reputation:
             break
     # 若命中可疑下载链接(资源站形态)
     r.base_score = score
+    r.final_score = score
     return r
 
 
